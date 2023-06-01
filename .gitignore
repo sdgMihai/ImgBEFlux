@@ -31,3 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+
+# macOS Finder
+.DS_Store
+
+# Windows auto-generated files
+Thumbs.db
+Desktop.ini
+
