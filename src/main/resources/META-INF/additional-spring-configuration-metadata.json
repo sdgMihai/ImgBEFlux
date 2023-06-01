@@ -1,0 +1,23 @@
+{
+  "properties": [
+    {
+      "name": "NUM_THREADS",
+      "type": "java.lang.Integer",
+      "description": "The number of threads apply the filter in parallel."
+    },
+    {
+      "name": "REQ_PARALLEL",
+      "type": "java.lang.Integer",
+      "description": "Number of REQ_PARALLEL requests that are processed in parallel."
+    },
+    {
+      "name": "base_fe_url",
+      "type": "java.lang.String",
+      "description": "FQDN of frontend URL."
+    },
+    {
+      "name": "realm",
+      "type": "java.lang.String",
+      "description": "Keycloak realm for auth used by application."
+    }
+  ] }
