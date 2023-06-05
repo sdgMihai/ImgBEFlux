@@ -1,10 +1,7 @@
-server:
-  port: 8081
-  servlet:
-    context-path: /resource-server
-  tomcat:
-    max-swallow-size: 90MB
-    connection-timeout: 120s
+#server:
+#  port: 8081
+#  servlet:
+#    context-path: /resource-server
 ####### resource server configuration properties
 spring:
   servlet:
@@ -13,17 +10,13 @@ spring:
       max-request-size: 90MB
 logging:
   level:
-    root: INFO
+    root: debug
     org:
       springframework:
-        web: INFO
+        web: debug
       hibernate:
         internal:
           util: INFO
-      apache:
-        coyote:
-          http11:
-            Http11InputBuffer: OFF
 ######################### my variables #######################################
 NUM_THREADS: 4
 REQ_PARALLEL: 4
