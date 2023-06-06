@@ -1,5 +1,6 @@
 package com.img.resource.web;
 
+import com.img.resource.error.InternalServerErrorException;
 import com.img.resource.service.ImageFormatIO;
 import com.img.resource.service.ImgSrv;
 import com.img.resource.utils.Image;
@@ -10,28 +11,19 @@ import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.multipart.MultipartHttpServletRequest;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.Iterator;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 @Slf4j
 @CrossOrigin(value = { "http://localhost" },
         maxAge = 900
 )
+@RequestMapping("/api")
 @RestController
 public class Controller {
     private final ImgSrv imgSrv;
@@ -44,80 +36,104 @@ public class Controller {
     }
 
     @PostMapping(value = "/filter", produces = MediaType.IMAGE_PNG_VALUE)
-    public Mono<ResponseEntity<byte[]>> filterImage(@RequestParam("filter") String filter,
-                                                    @RequestParam("level") String level,
-                                                    @RequestPart("file") FilePart request) { //
-        log.debug("debug message in image filter !");
+    public Mono<ResponseEntity<byte[]>> filterImage(@RequestParam("filter") String filter
+            , @RequestPart("file") FilePart request) { //
+        log.debug("start image http req processing");
         if (request == null) {
-            return Mono.just(
-                    ResponseEntity.badRequest().build()
-            );// .body("No file was uploaded.")
+            return retBadRequest(new Throwable("null request"));
         }
-//        String userId = principal.getClaimAsString("sub");
-
-        return    request.content().reduce(DataBuffer::write)
-                    .map(dataBuffer -> {
-                        byte[] bytes = new byte[dataBuffer.readableByteCount()];
-                        dataBuffer.read(bytes);
-                        DataBufferUtils.release(dataBuffer);
-                        return bytes;
-                    })
-                .publishOn(Schedulers.boundedElastic())
-                    .map(image -> {
-
-                        final Mono<ResponseEntity<byte[]>> internalServerError = Mono.just(
-                                ResponseEntity.internalServerError().body(new byte[0])
-                        );
-
-                        try {
-                            String filterName = null;
-                            if (filter != null) {
-                                filterName = filter;
-                            }
-                            String filterParams = null;
-                            if (level != null) {
-                                filterParams = level;
-                            }
-                            assert (image.length != 0);
-                            BufferedImage bufferedImage;
-                            bufferedImage = ImageIO.read(new ByteArrayInputStream(image));
-
-                            final Image input = imageFormatIO.bufferedToModelImage(bufferedImage);
-                            final Mono<Image> res;
-                            imgSrv.process(input, filterName, filterParams)
-                                    .map(image2 -> {
-                                        log.debug("future of res obtained");
-                                        BufferedImage image1;
-                                        image1 = imageFormatIO.modelToBufferedImage(image2);
-                                        log.debug("buffered result image obtained");
-                                        final byte[] bytes;
-                                        bytes = imageFormatIO.bufferedToByteArray(image1);
-                                        log.debug("bytes result image obtained");
-                                        return bytes;
-                                    }).subscribe();
-
-
-
-
-                            log.debug("imaged has been saved");
-                            return Mono.just(ResponseEntity.ok(bytes));
-                        } catch (IOException | InterruptedException | ExecutionException | TimeoutException e) {
-                            e.printStackTrace();
-                            log.debug(e.getMessage());
-                            return internalServerError;
-                        }
-
-
-                        return Mono.just(
-                                ResponseEntity.badRequest()
-                                        .body(new byte[0])
-                        );
-                    }).defaultIfEmpty(Mono.just(ResponseEntity.badRequest().build()));
+        return
+                mapRequestInput(request, filter, null)
+                .map(this::mapImageToMono)
+                .flatMap(this::processImage)
+                .map(this::mapProcessedImageToMono)
+                .onErrorResume(InternalServerErrorException.class, e ->
+                        Mono.just(ResponseEntity
+                                .internalServerError().build()
+                                ));
     }
 
-    @PostMapping(value = "/filter/ret", produces = MediaType.IMAGE_PNG_VALUE)
-    public Mono<ResponseEntity<byte[]>> filterImage(@RequestParam("ord_id") String ordId) {
-
+    private Mono<byte[]> getImageBytes(FilePart request) {
+        return request.content().reduce(DataBuffer::write)
+                .map(dataBuffer -> {
+                    byte[] bytes = new byte[dataBuffer.readableByteCount()];
+                    dataBuffer.read(bytes);
+                    DataBufferUtils.release(dataBuffer);
+                    return bytes;
+                });
     }
 
+    private Mono<Request> mapRequestInput(FilePart request, String filter, String level) {
+        return getImageBytes(request)
+                .map(bytes -> new Request( filter, level, bytes));
+    }
+
+    private Mono<ResponseEntity<byte[]>> retBadRequest(Throwable throwable) {
+        log.error(throwable.getMessage());
+        return Mono.just(
+                ResponseEntity.badRequest()
+                        .build()
+        );
+    }
+
+    private PipeRequest mapImageToMono(Request input) throws InternalServerErrorException {
+        byte[] image = input.image();
+        String filter = input.filter();
+        String level = input.level();
+
+        String filterName = null;
+        if (filter != null) {
+            filterName = filter;
+        } else throw new IllegalArgumentException("filter cannot be empty");
+        String filterParams = null;
+        if (level != null) {
+            filterParams = level;
+        }
+
+        log.debug("image has length:" + image.length);
+        BufferedImage bufferedImage;
+        try {
+            bufferedImage = ImageIO.read(new ByteArrayInputStream(image));
+        } catch (IOException e) {
+            e.printStackTrace();
+            log.debug(e.getMessage());
+            throw new InternalServerErrorException(e.getMessage());
+        }
+
+        final Image inImage = imageFormatIO.bufferedToModelImage(bufferedImage);
+
+        return new PipeRequest(inImage, filterName, filterParams);
+    }
+
+    private Mono<Image> processImage(PipeRequest pipeRequest) {
+        return imgSrv.process(pipeRequest.image()
+                , pipeRequest.filterName()
+                , pipeRequest.filterParams())
+                .doAfterTerminate(() -> log.debug("processImage function termination"));
+    }
+
+
+    private ResponseEntity<byte[]> mapProcessedImageToMono(Image image2)  throws InternalServerErrorException {
+        BufferedImage image1;
+        image1 = imageFormatIO.modelToBufferedImage(image2);
+        log.debug("buffered result image obtained");
+
+        final byte[] bytes;
+        try {
+            bytes = imageFormatIO.bufferedToByteArray(image1);
+        } catch (IOException e) {
+            e.printStackTrace();
+            log.debug(e.getMessage());
+            throw new InternalServerErrorException(e.getMessage());
+        }
+        log.debug("bytes result image obtained");
+
+        log.debug("imaged has been saved");
+        return ResponseEntity.ok(bytes);
+    }
 }
+
+record Request(String filter, String level, byte[] image) {
+}
+
+record PipeRequest(Image image, String filterName, String filterParams) {}
