@@ -6,11 +6,11 @@ import com.img.resource.utils.ImageUtils;
 import com.img.resource.utils.Pixel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.util.Pair;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.stream.Stream;
 
 @Slf4j
 public class NonMaximumSuppressionFilter implements Filter {
@@ -28,26 +28,18 @@ public class NonMaximumSuppressionFilter implements Filter {
      * @param in          input image reference.
      * @param out         output image reference.
      * @param PARALLELISM integer value denoting the number of task running in parallel.
+     * @return Mono<Image> processed image.
      */
     @Override
-    public void applyFilter(Image in, Image out, final int PARALLELISM, final Executor executor) {
-        CompletableFuture<Void>[] partialFilters = new CompletableFuture[PARALLELISM];
+    public Mono<Image> applyFilter(Image in, Image out, final int PARALLELISM, final Executor executor) {
         Pair<Integer, Integer>[] ranges = ImageUtils.getRange(PARALLELISM, in.height);
-        log.debug("active threads in filterExecutor:" + ((ThreadPoolTaskExecutor)executor).getActiveCount());
-        for (int i = 0; i < PARALLELISM; i++) {
-            int start = ranges[i].getFirst();
-            int stop = ranges[i].getSecond();
-            partialFilters[i] = CompletableFuture.runAsync(
-                    () -> applyFilterPh1(in, out, start, stop)
-                    , executor
-            );
-        }
-//        CompletableFuture.allOf(partialFilters).join();
-        Stream.of(partialFilters)
-                .map(CompletableFuture::join)
-                .forEach((Void) -> {
-                    log.debug("finish ph1 nm th");
-                });
+
+        return Flux.fromArray(ranges)
+                // ph1
+                .flatMap(range -> Mono.fromRunnable(() ->
+                                applyFilterPh1(in, out, range.getFirst(), range.getSecond()))
+                        .subscribeOn(Schedulers.fromExecutor(executor)))
+                .then(Mono.just(out));
     }
 
 

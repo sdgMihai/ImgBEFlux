@@ -18,21 +18,14 @@ public class FilterService {
     /**
      Transform filter names and parameters to list of filters.
      */
-    public static List<Filter> getFilters(String[] filterNames
-            , String[] filterParams) {
-        Iterator<String> filterParamsIt = null;
-        if (filterParams != null) {
-            filterParamsIt = Arrays.stream(filterParams).iterator();
-        }
+    public static List<Filter> getFilters(String filterName
+            , String filterParams) {
 
-        List<Filter> filters = new ArrayList<>(filterNames.length);
-        for (var filterName : filterNames) {
-            if (filterNameEquals(filterName, Filters.BRIGHTNESS.toString())) {
+        List<Filter> filters = new ArrayList<>(1);
+        if (filterNameEquals(filterName, Filters.BRIGHTNESS.toString())) {
                 double param = 0;
-                assert filterParamsIt != null;
-                if (filterParamsIt.hasNext()) {  // increment index to get the brightness level from data.filters
-                    param = Double.parseDouble(filterParamsIt.next());
-                }
+                param = Double.parseDouble(filterParams);
+
                 log.debug(String.format("using level %f", param));
 
                 filters.add(FilterFactory.filterCreate(filterName
@@ -43,10 +36,6 @@ public class FilterService {
                 ));
             } else if (filterNameEquals(filterName, Filters.CONTRAST.toString())) {
                 double param = 0;
-                assert filterParamsIt != null;
-                if (filterParamsIt.hasNext()) {
-                    param = Double.parseDouble(filterParamsIt.next());
-                }
                 log.debug(String.valueOf(param));
 
                 filters.add(FilterFactory.filterCreate(filterName
@@ -58,7 +47,7 @@ public class FilterService {
             } else {
                 filters.add(FilterFactory.filterCreate(filterName));
             }
-        }
+
         return filters;
     }
 }

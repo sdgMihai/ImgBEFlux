@@ -5,13 +5,12 @@ import com.img.resource.utils.ImageUtils;
 import com.img.resource.utils.Pixel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.util.Pair;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.Date;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.stream.Stream;
 
 @Slf4j
 public class GradientFilter implements Filter {
@@ -33,9 +32,10 @@ public class GradientFilter implements Filter {
      * @param in          input image reference.
      * @param out         output image reference.
      * @param PARALLELISM integer value denoting the number of task running in parallel.
+     * @return
      */
     @Override
-    public void applyFilter(Image in, Image out, final int PARALLELISM, final Executor executor) {
+    public Mono<Image> applyFilter(Image in, Image out, final int PARALLELISM, final Executor executor) {
         Ix = new float[in.height][];
         Iy = new float[in.height][];
         theta = new float[in.height][];
@@ -52,38 +52,22 @@ public class GradientFilter implements Filter {
         log.debug("Running: " + Thread.currentThread().getId() + " | " + new Date());
 
         // ph1
-        CompletableFuture<Float>[] partialFilters = new CompletableFuture[PARALLELISM];
         Pair<Integer, Integer>[] ranges = ImageUtils.getRange(PARALLELISM, in.height);
-        for (int i = 0; i < PARALLELISM; i++) {
-            int start = ranges[i].getFirst();
-            int stop = ranges[i].getSecond();
-            partialFilters[i] = CompletableFuture.supplyAsync(
-                    () -> applyFilterPh1(in, out, start, stop)
-                    , executor
-            );
-        }
-        final Optional<Float> gMax = Stream.of(partialFilters)
-                .map(CompletableFuture::join)
-                .max(Float::compareTo);
-        // ph2
-        CompletableFuture<Void>[] partialFilters2 = new CompletableFuture[PARALLELISM];
-        for (int i = 0; i < PARALLELISM; i++) {
-            int start = ranges[i].getFirst();
-            int stop = ranges[i].getSecond();
 
-            partialFilters2[i] = CompletableFuture.runAsync(
-                    () -> applyFilterPh2(in, out, start, stop, gMax.get())
-                    , executor
-            );
-        }
-         Stream.of(partialFilters2)
-                .map(CompletableFuture::join)
-                        .forEach((Void) -> {
-                            log.debug("finish ph2");
-                        });
-        log.debug("scheduler queue:"+ ((ThreadPoolTaskExecutor)executor).getQueueSize());
-        log.debug("active bf grad phase 2:" + ((ThreadPoolTaskExecutor)executor).getActiveCount());
-//        CompletableFuture.allOf(partialFilters2).join();
+        return Flux.fromArray(ranges)
+                // ph1
+                .flatMap(range -> Mono.fromCallable(() ->
+                                applyFilterPh1(in, out, range.getFirst(), range.getSecond()))
+                        .subscribeOn(Schedulers.fromExecutor(executor)))
+                .reduce(Math::max)
+                // ph2
+                .flatMap((Float gMax) -> Flux.fromArray(ranges)
+                        .flatMap(range -> Mono.fromRunnable(() ->
+                                        applyFilterPh2(in, out, range.getFirst(), range.getSecond(), gMax))
+                                        .subscribeOn(Schedulers.fromExecutor(executor)).then()
+                        )
+                        .then(Mono.just(out))
+                );
     }
 
     public float applyFilterPh1(Image image, Image newImage, int start, int stop) {
@@ -138,9 +122,8 @@ public class GradientFilter implements Filter {
         return threadgMax;
     }
 
-
     public void applyFilterPh2(Image image, Image newImage, int start, int stop, float gMax) {
-        log.debug("applying filter gradient phase 2");
+//        log.debug("applying filter gradient phase 2");
         // 4. Se calculeaza G = G / G.max() * 255
         for (int i = start; i < stop; ++i) {
             for (int j = 1; j < image.width - 1; ++j) {

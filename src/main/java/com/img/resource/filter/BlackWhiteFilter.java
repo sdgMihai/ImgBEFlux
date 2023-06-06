@@ -22,7 +22,7 @@ public class BlackWhiteFilter extends AbstractFilter{
             }
         }
         Duration duration = Duration.between(startTime, Instant.now());
-        log.info("time processing " + (stop-start) + " lines of length:" + image.width + " duration:" + duration);
-        log.debug("bw filter ph1:" + start);
+//        log.info("time processing " + (stop-start) + " lines of length:" + image.width + " duration:" + duration);
+//        log.debug("bw filter ph1:" + start);
     }
 }
